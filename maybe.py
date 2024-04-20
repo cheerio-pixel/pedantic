@@ -126,6 +126,9 @@ class Maybe(Generic[T]):
             return cls(value)
         return cls(None)
 
+    def __rshift__(self, func):
+        return self.flat_map(func)
+
     # Esta funcion no deberia de estar aqui, pero como es de cosas de
     # programacion funcional, se queda.
     @classmethod
@@ -146,3 +149,12 @@ class Maybe(Generic[T]):
         for arg in args:
             result = arg()
         return result
+
+    def get(self, key):
+        if self.value is not None:
+            if hasattr(self.value, "get"):
+                return Maybe(self.value.get(key))
+            else:
+                raise AttributeError(self.value, "No tiene metodo 'get'")
+
+        return Maybe(None)
