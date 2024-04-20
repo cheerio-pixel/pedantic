@@ -119,6 +119,7 @@ class NorvigCorrector:
         # Ejemplo: word = sazon
         # splits = [("", "sazon"), ("s", "azon"), ("sa", "zon"), ("saz", "on"), ("sazo", "n"), ("sazon", "")]
         splits = [(word[:i], word[i:]) for i in range(len(word) + 1)]
+
         # Elimina una palabra. Hace esto saltandose una letra del lado
         # derecho de las divisiones anterior y concatenando con el lado derecho
         deletes = [L + R[1:] for L, R in splits if R]

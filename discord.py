@@ -18,15 +18,7 @@ class GatewayOpcode:
     """
 
     Dispatch = 0
-    """Client Action: Receive
-
-    An event was dispatched
-    """
     Heartbeat = 1
-    """Client Action: Send/Receive
-
-    Fired periodically by the client to keep the connection alive.
-    """
     Identify = 2
     Presence = 3
     Voice_State = 5
@@ -52,6 +44,10 @@ class GatewayEvents:
 
 class GatewayIntents:
     """Bit flags de los persmisos de la GatewayAPI.
+
+    Revise
+    https://discord.com/developers/docs/topics/gateway#gateway-intents para
+    saber que hace cada uno.
     """
     GUILDS = 1 << 0
     GUILD_MEMBERS = 1 << 1
@@ -74,19 +70,49 @@ class GatewayIntents:
 
 
 class HeartbeatTimer:
+    """Temporizador para el hilo de los Heartbeats
+    """
     def __init__(self):
         self.init_time = time.perf_counter()
         self.last_time = time.perf_counter()
 
     def start(self):
+        """Empieza el temporizador.
+        """
         self.init_time = time.perf_counter()
 
     def stop(self) -> float:
+        """Para el temporizador.
+
+        Returns
+        -------
+        El tiempo en segundos que transcurrio desde la ultima vez que se
+        llamo al metodo `~HeartbeatTimer:start`.
+        """
         self.last_time = time.perf_counter()
         return self.last_time -  self.init_time
 
 class DiscordGatewayClient:
+    """Cliente del API Gateway de Discord.
+
+    Para registra eventos revise el decorador register.
+    Revise https://discord.com/developers/docs/topics/gateway-events#receive-events para ver los eventos disponibles.
+    """
     def __init__(self, factory: WebsocketFactory, token: str, intents: int = GatewayIntents.MESSAGE_CONTENT):
+        """
+        Parameters
+        ----------
+        factory: WebsocketFactory
+            Factoria de websockets.
+
+        token: str
+            El token de cliente del bot.
+
+        intents: int
+            Los Intents, acciones que el bot declara que necesita hacer. Un
+            bit flag, revise la clase GatewayIntents para saber todos los
+            intents.
+        """
         self.factory = factory
         self.token = token
         self.intents = intents
@@ -140,6 +166,19 @@ class DiscordGatewayClient:
         return inner_function
 
     def pull_message(self, ws: Websocket) -> Maybe[Any]:
+        """Recibe un eventos del Websocket conectado al API de Gateway.
+
+        Parameters
+        ----------
+        ws: Websocket
+            El websocket que esta conectado al api de Gateway de discord.
+
+        Returns
+        -------
+        Maybe[Any]
+            Tal vez un evento, en caso de que no haya un error o se corte
+            la conexion.
+        """
         try:
             message = ws.receive_messages()
             return message.map(json.loads)
@@ -148,6 +187,8 @@ class DiscordGatewayClient:
             return Maybe(None)
 
     def run(self):
+        """Empieza el bucle principal del programa.
+        """
         ws, _ = self.factory.handshake()
         with ws:
             # Primero saca el mensaje de inicio
@@ -159,10 +200,6 @@ class DiscordGatewayClient:
             while True:
                 payload = self.pull_message(ws).value
                 if not payload:
-                    # TODO: Handle disconnect
-                    # TODO: Handle resume
-                    # TODO: Handle rate limit
-                    # TODO: ¿Mejor redirige los opcodes al cliente?
                     break
 
                 event_type = payload.get("t")
@@ -177,24 +214,59 @@ class DiscordGatewayClient:
                     self.acknowledge_heartbeat()
 
                 if opcode == GatewayOpcode.Dispatch:
-                    self.handle_event(event_type, data)
+                    # Maneja el evento en un hilo separado.
+                    threading.Thread(target=self.handle_event, args=(event_type, data)).start()
 
     def hello(self, ws: Websocket, data: Any):
+        """Reacciona al evento Hello.
+
+        Parameters
+        ----------
+        ws: Websocket
+            El websocket en el cual enviaremos el primer Heartbeat.
+
+        data: Any
+            Los datos enviados en el evento Hello.
+        """
         if data:
             self.heartbeat_interval = data["d"]["heartbeat_interval"] / 1000.0
             self.send_heartbeat(ws)
 
     def start_heartbeat_handler(self, ws: Websocket):
+        """Empieza un hilo que envia los Heartbeats por el socket.
+
+        Parameters
+        ----------
+        ws: Websocket
+            El websocket por donde enviaremos los Heartbeat.
+        """
         self.heartbeat_thread = threading.Thread(target=self.heartbeat_loop, args=(ws,))
         self.heartbeat_thread.daemon = True
         self.heartbeat_thread.start()
 
     def heartbeat_loop(self, ws: Websocket):
+        """Empieza el bucle que envia los Heartbeats.
+
+        Parameters
+        ----------
+        ws: Websocket
+            El websocket por donde enviaremos los Heartbeat.
+        """
         while True:
             time.sleep(self.heartbeat_interval or 0)
             self.send_heartbeat(ws, self.last_sequence)
 
     def send_heartbeat(self, ws: Websocket, data = None):
+        """Envia un Heartbeat por el socket.
+
+        Parameters
+        ----------
+        ws: Websocket
+            El websocket por donde enviaremos los Heartbeat.
+
+        data: Any | None
+            Datos que tal vez sean necesario para resumir la conexion.
+        """
         payload = {
             "op": GatewayOpcode.Heartbeat,
             "d": data
@@ -203,6 +275,16 @@ class DiscordGatewayClient:
         self.heartbeat_time.start()
 
     def handle_event(self, event_type: str, event_data: Any):
+        """Maneja un evento del API Gateway de Discord.
+
+        Parameters
+        ----------
+        event_type: str
+            El tipo de evento. Vease https://discord.com/developers/docs/topics/gateway-events#receive-events para mas informacion.
+
+        event_data: Any
+            Objeto del evento.
+        """
         if event_type == GatewayEvents.READY:
             event_unserialized = ReadyEvent(**event_data)
             self.session_id = event_unserialized.session_id
@@ -229,11 +311,21 @@ class DiscordGatewayClient:
             print("Evento " + event_type + " sin manejador.")
 
     def acknowledge_heartbeat(self):
+        """Resetea el temporizador del Heartbeat y revisa la latencia entre
+        cuando se envio y cuando recibimos confirmacion.
+        """
         result = self.heartbeat_time.stop()
         if result >= 10:
             print("Hubo un restraso de " + str(result) + " segundos desde que se envio el ultimo Heartbeat")
 
     def identify(self, ws: Websocket):
+        """Autentica esta sesion.
+
+        Parameters
+        ----------
+        ws: Websocket
+            El websocket donde tenemos que autenticarnos.
+        """
         payload = {
             "op": 2,
             "d": {

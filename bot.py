@@ -20,8 +20,24 @@ from model import AuthorizedUser, CreateMessage, Message, ReadyEvent
 base_api_url = "https://discord.com/api/v10"
 
 
-def button(msg: str, id: str | None = None):
-    # https://discord.com/developers/docs/interactions/message-components#button-object-button-styles
+def button(msg: str, id: str | None = None) -> dict[str, Any]:
+    """Crea un diccionario que representa (en discord) un boton con
+    mensaje.
+
+    Su estilo predeterminado es secundario. Para saber mas revisa
+    https://discord.com/developers/docs/interactions/message-components#button-object-button-styles
+
+    Parameters
+    ----------
+    msg: str
+        Mensaje dentro del boton.
+
+    Returns
+    -------
+    dict[str, Any]
+        Diccionario que representa el boton.
+    """
+
     return {
         "type": 2,  # Boton
         "style": 2,  # Secundario
@@ -75,7 +91,23 @@ def send_msg(
         pprint(response.body)
 
 
-def send_interaction_response(payload: Any, interaction_id: str, interaction_token: str):
+def send_interaction_response(payload: dict[str, Any], interaction_id: str, interaction_token: str):
+    """Envia una respuesta a evento de Interaction.
+
+    Revisa https://discord.com/developers/docs/interactions/receiving-and-responding#responding-to-an-interaction
+    para saber formas de responder a un Interaction
+
+    Parameters
+    ----------
+    payload: dict[str, Any]
+        Un objeto respuesta. Vea https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object para saber mas.
+
+    interaction_id: str
+        Id del Interaction.
+
+    interaction_token: str
+        Token del interaction. Valido 15 minutos despues de su creacion.
+    """
     headers = {
         "Content-Type": ["application/json"],
     }
@@ -87,15 +119,42 @@ def send_interaction_response(payload: Any, interaction_id: str, interaction_tok
         pprint(response.body)
 
 def send_interaction_text_response(msg: str, interaction_id: str, interaction_token: str):
+    """Envia un mensaje como respuesta a un evento de Interaction.
+
+    Revisa https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-response-object-messages para mas detalles.
+
+    Parameters
+    ----------
+    msg: str
+        Cuerpo del mensaje.
+
+    interaction_id: str
+        Id del Interaction.
+
+    interaction_token: str
+        Token del interaction. Valido 15 minutos despues de su creacion.
+    """
     payload = {
         "type": 4,
         "data": {
             "content": msg,
-        }
+        },
     }
     send_interaction_response(payload, interaction_id, interaction_token)
 
 def send_interaction_ack_response(interaction_id: str, interaction_token: str):
+    """Envia un PONG como respuesta a un evento Interaction.
+
+    Funciona como un no-operacion (noop) para cuando se recibe un Interaction.
+
+    Parameters
+    ----------
+    interaction_id: str
+        Id del Interaction.
+
+    interaction_token: str
+        Token del interaction. Valido 15 minutos despues de su creacion.
+    """
     payload = {
         "type": 1
     }
@@ -103,6 +162,17 @@ def send_interaction_ack_response(interaction_id: str, interaction_token: str):
 
 
 def delete_message(user: AuthorizedUser, channel_id: str, message_id: str):
+    """Borra un mensaje del historial de discord bajo la autorizacion de un
+    usuario o bot.
+
+    Parameters
+    ----------
+    channel_id: str
+        Id del canal de discord.
+
+    message_id: str
+        Id del mensaje de discord.
+    """
     headers  = {
         "Authorization" : ["Bot " + user.token]
     }
@@ -122,17 +192,44 @@ def delete_message(user: AuthorizedUser, channel_id: str, message_id: str):
 
 
 class BotConfig(Protocol):
+    """Protocolo de configuracion del bot.
+
+    Define el estado de un bot y las formas de personalizarlo.
+    """
     @property
-    def is_being_pedantic(self) -> bool: ...
+    def is_being_pedantic(self) -> bool:
+        """Revisa si el bot esta activado o no.
+
+        Returns
+        -------
+        bool
+            True si esta activado, False en caso contrario.
+        """
+        ...
 
     @is_being_pedantic.setter
-    def is_being_pedantic(self, value: bool) -> None: ...
+    def is_being_pedantic(self, value: bool) -> None:
+        """Setter de esta propiedad.
+        """
+        ...
 
     @property
-    def prefix(self) -> str: ...
+    def prefix(self) -> str:
+        """Caracter o string que el bot intercepta como llamadas a
+        comandos.
+
+        Returns
+        -------
+        str
+            El prefijo configurado.
+        """
+        ...
 
 
 class BotInteractionsStore(Protocol):
+    """Protocolo de las acciones que necesita un bot para guardar
+    informacion de las interacciones.
+    """
     def get_interaction(self, interaction_id: str) -> Maybe[str]:
         """Obten la palabra de una interaccion.
 
@@ -164,6 +261,8 @@ class BotInteractionsStore(Protocol):
 
 
 class InMemoryBotInteractionsStore:
+    """Implementacion del protocolo `BotInteractionsStore` para operaciones en la memoria.
+    """
     def __init__(self):
         self.store: dict[str, str] = {}
 
@@ -176,6 +275,8 @@ class InMemoryBotInteractionsStore:
 
 # Go-esque implementation without compile-time assurance
 class InMemoryBotConfig:
+    """Implementacion del protocolo `BotConfig` para configuracion en la memoria.
+    """
     def __init__(self, prefix: str, pedantic: bool = True):
         self._pedantic = pedantic
         self._prefix = prefix
@@ -194,6 +295,20 @@ class InMemoryBotConfig:
 
 
 class Bot(discord.DiscordGatewayClient):
+    """Bot de Pedantic. Se encarga de leer todos los mensajes de discord y
+    quejarse por errores tipograficos.
+
+    Attributes
+    ----------
+    _bot_config: BotConfig
+        La configuracion del bot.
+
+    _corrector: Corrector
+        La logica interna del bot.
+
+    _interaction_store: BotInteractionsStore
+        El encargado de ayudar a coordinar los eventos de la api Interaction.
+    """
     def __init__(
         self,
         *,
@@ -207,6 +322,7 @@ class Bot(discord.DiscordGatewayClient):
         self._corrector = corrector
         self._interaction_store = interaction_store
 
+        # Decoradores
         self.on_message = self.register(
             discord.GatewayEvents.MESSAGE_CREATE, lambda data: CreateMessage(**data)
         )(self.on_message)
@@ -216,13 +332,53 @@ class Bot(discord.DiscordGatewayClient):
         )
 
     def prefixed_with(self, content: str, command: str) -> bool:
+        """Revisa si el mensaje es un comando de bot con dicho nombre.
+
+        Parameters
+        ----------
+        content: str
+            El contenido del mensaje.
+
+        command: str
+            El comando que esperamos.
+
+        Returns
+        -------
+        bool
+            Verdadero si es ese comando, falso en caso contrario.
+        """
         return content == self._bot_config.prefix + command
 
     def show_status(self, user: AuthorizedUser, message: CreateMessage):
+        """Envia un mensaje con el estado del bot en el canal de discord
+        que activo este evento.
+
+        Parameters
+        ----------
+        user: AuthorizedUser
+            El usuario que enviara este mensaje.
+
+        message: CreateMessage
+            El mensaje que incio este evento.
+        """
         reply = "Activado" if self._bot_config.is_being_pedantic else "Desactivado"
         send_msg(user, message.channel_id, reply, message.id)
 
-    def register_new_word(self, user: AuthorizedUser, word: str, interaction_message: Any):
+    def register_new_word(self, word: str, user: AuthorizedUser, interaction_message: Any):
+        """Registra una nueva palabra en el diccionario y avisa del cambio por discord.
+
+        Parameters
+        ----------
+        word: str
+            La palabra a añadir.
+
+        user: AuthorizedUser
+            El usuario que avisa del cambio en el diccionario.
+
+        interaction_message: Any
+            En evento que inicio esta accion.
+
+        """
 
         Maybe.do(
             Maybe.progn(lambda: self._corrector.add_word(word),
@@ -237,11 +393,14 @@ class Bot(discord.DiscordGatewayClient):
         )
 
     def on_interaction(self, user: AuthorizedUser, message: Any):
+        """Manejador del evento INTERACTION_CREATE.
+        """
+
         operation = Maybe.do(
             # or True, forzara a esta expresion a evaluarse a un valor
             # valido, de esa forma nosotros podemos desampacarlo y saber si
             # la operacion si se ejecuto.
-            self.register_new_word(user, word, message) or True
+            self.register_new_word(word, user, message) or True
             for data in Maybe(message.get("data"))
             for custom_id in Maybe(data.get("custom_id"))
             for word in self._interaction_store.get_interaction(custom_id)
@@ -255,6 +414,8 @@ class Bot(discord.DiscordGatewayClient):
             )
 
     def on_ready(self, user: AuthorizedUser, message: ReadyEvent):
+        """Manejador del evento READY.
+        """
         print("Sesion iniciada como " + user.username)
 
     def on_ayuda(self, user: AuthorizedUser, message: Message):
@@ -277,6 +438,11 @@ class Bot(discord.DiscordGatewayClient):
             )
 
     def on_message(self, user: AuthorizedUser, message: CreateMessage):
+        """Manejador del evento MESSAGE_CREATE.
+
+        Este manejador se encarga de analizar los comandos y redigirir las
+        palabras al corrector.
+        """
         if message.author.id == user.id:
             return
 

@@ -191,7 +191,7 @@ class Frame:
             # enmascaran los dato, ¿Como? Usan el algoritmo presentado mas
             # adelante y envuelven los datos para que no sean faciles de
             # leer, ¿Por que? En esta parte no lo tengo claro, pero es para
-            # que intermedirios (una proxy, por ejemplo) no puedan predecir
+            # que intermediarios (una proxy, por ejemplo) no puedan predecir
             # (hacer cache) el formato de los datos. ¿Por que esto causa
             # problemas? Tambien quiero saberlo, pero la secuencia de casos
             # que un hacker debe de dar son largos, y carezco la madurez de
