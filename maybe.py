@@ -107,7 +107,7 @@ class Maybe(Generic[T]):
 
     @classmethod
     def do(cls, iterable: Iterable):
-        """Des-empaca el valor dentor de una iterable como un Maybe. Se
+        """Des-empaca el valor dentro de una iterable como un Maybe. Se
         supone que debe de ser utilizado con una comprension de listas de
         Maybe's
 
